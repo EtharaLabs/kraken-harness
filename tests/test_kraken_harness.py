@@ -91,7 +91,7 @@ def agent_config(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def no_harbor_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(command: list[str]) -> int:
+    def refuse(command: list[str], env: object = None) -> int:
         raise AssertionError(f"a test ran Harbor: {command}")
 
     monkeypatch.setattr(Harbor, "run", staticmethod(refuse))
@@ -218,7 +218,7 @@ def test_workspace_carries_agent_visible_and_config_bytes_only(
 def test_infer_dry_run_writes_validated_layers_and_runs_nothing(
     project: Path, tmp_path: Path, agent_config: Path
 ) -> None:
-    assert _infer(project, tmp_path, agent_config, "--rollouts", "2") == 0
+    assert _infer(project, tmp_path, agent_config, "--rollouts", "2", "--via", "trial") == 0
     work = (tmp_path / "work").resolve()
     records = [
         json.loads(line) for line in (work / "rollouts.jsonl").read_text().splitlines()
@@ -232,7 +232,7 @@ def test_infer_dry_run_writes_validated_layers_and_runs_nothing(
     layer_path = work / "workspaces" / BUNDLE / "trial-r1.json"
     layer = json.loads(layer_path.read_text())
     assert layer["verifier"] == {"disable": True}
-    assert layer["task"] == {"path": str(work / "workspaces" / BUNDLE / "task")}
+    assert layer["task"] == {"path": str(work / "workspaces" / BUNDLE / BUNDLE)}
     assert layer["agent"] == {
         "name": "claude-code",
         "model_name": "anthropic/claude-opus-4-1",

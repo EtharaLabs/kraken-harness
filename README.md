@@ -16,8 +16,10 @@ The benchmark extension an external runner uses to run inference and evaluation 
 
 ```text
 usage: kraken-infer [-h] [--root ROOT] [--benchmark BENCHMARK] --work-dir WORK_DIR
-                    [--dry-run] --agent-config AGENT_CONFIG [--lane LANE]
-                    [--instance INSTANCE] [--rollouts ROLLOUTS]
+                    [--dry-run] [--run-config RUN_CONFIG] [--compute PROFILE]
+                    --agent-config AGENT_CONFIG [--lane LANE] [--instance INSTANCE]
+                    [--rollouts ROLLOUTS] [--via {job,trial}] [--probe]
+                    [--harness-config PIN] [--emit-harness-config PATH]
 
 Run the agent under test on resident bundles through the pinned Harbor release with
 verification off. Each trial directory is a rollout log for kraken-eval.
@@ -32,6 +34,11 @@ options:
                         records
   --dry-run             prepare and validate everything, print the Harbor commands, and
                         run none
+  --run-config RUN_CONFIG
+                        a run.toml of allowlisted Harbor extras, env_from_host names and
+                        compute profiles; any other key is refused
+  --compute PROFILE     the [compute.<PROFILE>] of --run-config: its Docker host and the
+                        gate host its containers reach
   --agent-config AGENT_CONFIG
                         a JSON or TOML file holding one agent table: the agent under
                         test and its model
@@ -40,13 +47,26 @@ options:
   --instance INSTANCE   a bundle uuid to run; repeatable (default: every resident
                         bundle)
   --rollouts ROLLOUTS   rollouts per instance (default: the benchmark's rollouts)
+  --via {job,trial}     run each rollout as a one-trial `harbor run` job, or as `harbor
+                        trial start` (default: job)
+  --probe               an author-side probe: one job runs the agent and the bundle's
+                        verifier together; a probe is never a rollout kraken-eval grades
+                        and never difficulty evidence
+  --harness-config PIN  refuse the run unless its resolved harness config hashes to PIN,
+                        a sha256 or a file --emit-harness-config wrote
+  --emit-harness-config PATH
+                        write the resolved harness config to PATH, print its sha256, and
+                        run nothing
 ```
 
 ### `kraken-eval`
 
 ```text
 usage: kraken-eval [-h] [--root ROOT] [--benchmark BENCHMARK] --work-dir WORK_DIR
-                   [--dry-run]
+                   [--dry-run] [--run-config RUN_CONFIG] [--compute PROFILE]
+                   [--allow-mixed-grading] [--pilot-summary UUID]
+                   [--pass-threshold PASS_THRESHOLD] [--group-size GROUP_SIZE]
+                   [--staging STAGING] [--run-id RUN_ID]
 
 Score each rollout kraken-infer recorded in --work-dir by regrading its trial through
 the pinned Harbor release with the bundle's own tests.
@@ -61,6 +81,23 @@ options:
                         records
   --dry-run             prepare and validate everything, print the Harbor commands, and
                         run none
+  --run-config RUN_CONFIG
+                        a run.toml of allowlisted Harbor extras, env_from_host names and
+                        compute profiles; any other key is refused
+  --compute PROFILE     the [compute.<PROFILE>] of --run-config: its Docker host and the
+                        gate host its containers reach
+  --allow-mixed-grading
+                        grade a bundle on this profile though another profile already
+                        graded it
+  --pilot-summary UUID  grade nothing; summarize the graded rollouts of bundle UUID as
+                        pilot groups
+  --pass-threshold PASS_THRESHOLD
+                        the regrade reward a rollout must reach to pass (default: 1.0)
+  --group-size GROUP_SIZE
+                        rollouts per pilot group (default: the benchmark's rollouts)
+  --staging STAGING     a directory outside --root where --pilot-summary copies the
+                        graded trial directories for .seed/pilots/rollouts/<UUID>/
+  --run-id RUN_ID       the sealing FORGE run the printed self-pilot command names
 ```
 
 ## Shared evaluation interface
@@ -134,8 +171,9 @@ FORGE never runs this extension against a solver. An author-side run is a `.seed
 
 ```sh
 uv sync --frozen
-uv run --frozen kraken-infer --root <parent> --work-dir <dir outside the parent> --agent-config agent.toml
-uv run --frozen kraken-eval --root <parent> --work-dir <the same dir>
+uv run --frozen kraken-infer --root <parent> --work-dir <dir outside the parent> --agent-config agent.toml \
+    --run-config run.toml --compute ec2
+uv run --frozen kraken-eval --root <parent> --work-dir <the same dir> --run-config run.toml --compute ec2
 uv run --frozen python -m kraken_harness.readme --check
 ```
 
@@ -145,7 +183,51 @@ uv run --frozen python -m kraken_harness.readme --check
 [agent]
 name = "<a Harbor agent name>"
 model_name = "<provider/model>"
+model_api_key_name = "<the host variable holding the model key>"
 ```
+
+The ``run.toml`` an operator passes with ``--run-config``: allowlisted Harbor extras.
+
+| table | allowed keys |
+| --- | --- |
+| top level | `agent`, `compute`, `env_from_host`, `environment`, `verifier` |
+| `[agent]` | `agent_setup_timeout_multiplier`, `base_url`, `model_api_format`, `model_api_key_name` |
+| `[environment]` | `extra_allowed_hosts`, `extra_docker_compose` |
+| `[verifier]` (evaluation and probes only) | `env`, `extra_allowed_hosts` |
+| `[compute.<name>]` | `agent_port`, `docker_host`, `gate_host`, `judge_env`, `judge_port`, `trinity_target` |
+
+```toml
+env_from_host = ["ANTHROPIC_API_KEY", "LITELLM_PROXY_API_KEY"]
+
+[agent]
+model_api_format = "anthropic_messages"
+agent_setup_timeout_multiplier = 10
+
+[environment]
+extra_allowed_hosts = ["deb.debian.org", "registry.npmjs.org"]
+extra_docker_compose = ["agent-hosts.compose.yaml"]
+
+[verifier]
+env = { REWARDKIT_JUDGE = "<judge>", LITELLM_PROXY_API_KEY = "${LITELLM_PROXY_API_KEY}" }
+
+[compute.local]
+docker_host = "unix://~/.colima/default/docker.sock"
+gate_host = "host.docker.internal"
+
+[compute.ec2]
+trinity_target = "@trinity"
+gate_host = "172.17.0.1"
+```
+
+Keep credential values off disk: names in configs, ``${NAME}`` templates in layers.
+
+Write each Harbor layer or job file owner-only, and remove it once its trial is over.
+
+`--via job` (the default) runs each rollout as a one-trial `harbor run` job with verification off; `--via trial` uses `harbor trial start`. `--probe` runs the agent and the bundle's verifier in one job under `probes/`: an author-side probe, never graded and never difficulty evidence. Refuse grading a bundle on a host other than the one that graded it already.
+
+The resolved run a rollout used, as one canonical document and its SHA-256 pin.
+
+Summarize one bundle's graded rollouts as the group counts an author pilot records.
 
 ## Upstream SWE-fficiency documentation
 

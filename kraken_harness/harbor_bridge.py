@@ -12,6 +12,7 @@ import importlib.metadata
 import json
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,13 @@ class Harbor:
         TrialConfig.model_validate(layer)
 
     @staticmethod
+    def validate_job(config: dict[str, Any]) -> None:
+        """Validate one job config with Harbor's own ``JobConfig`` model."""
+        from harbor.models.job.config import JobConfig
+
+        JobConfig.model_validate(config)
+
+    @staticmethod
     def validate_task(task_dir: Path, *, disable_verification: bool) -> None:
         """Refuse a task directory Harbor itself would not load."""
         from harbor.models.task.task import Task
@@ -62,8 +70,26 @@ class Harbor:
             raise ValueError(f"{task_dir}: Harbor does not accept this task directory")
 
     @staticmethod
+    def validate_regrade(task_dir: Path, task_name: str | None) -> None:
+        """Refuse a regrade Harbor's own ``trial regrade`` would refuse, with its own checks."""
+        from harbor.trial.regrade import check_task_regradable, local_task_name
+
+        if task_name is not None and local_task_name(task_dir) != task_name:
+            raise ValueError(
+                f"{task_dir}: provides task {local_task_name(task_dir)!r}, "
+                f"but the rollout ran {task_name!r}"
+            )
+        reason = check_task_regradable(task_dir)
+        if reason is not None:
+            raise ValueError(reason)
+
+    @staticmethod
     def trial_start(layer: Path) -> list[str]:
         return [COMMAND, "trial", "start", "--config", str(layer)]
+
+    @staticmethod
+    def job_run(config: Path) -> list[str]:
+        return [COMMAND, "run", "--config", str(config), "--yes"]
 
     @staticmethod
     def trial_regrade(
@@ -83,10 +109,14 @@ class Harbor:
         ]
 
     @staticmethod
-    def run(command: list[str]) -> int:
+    def run(command: list[str], env: Mapping[str, str] | None = None) -> int:
         executable = shutil.which(command[0])
         if executable is None:
             raise RuntimeError(
                 f"{command[0]} is not on PATH; run inside the harness environment"
             )
-        return subprocess.run([executable, *command[1:]], check=False).returncode
+        return subprocess.run(
+            [executable, *command[1:]],
+            check=False,
+            env=None if env is None else dict(env),
+        ).returncode

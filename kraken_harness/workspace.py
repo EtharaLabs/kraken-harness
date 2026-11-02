@@ -76,7 +76,9 @@ def prepare(instance: Instance, work_dir: Path) -> Workspace:
         raise FileExistsError(
             f"{root} already holds a workspace; choose a fresh work directory"
         )
-    task_dir = root / "task"
+    # Harbor names a trial after its task directory, so naming it by the bundle uuid gives the
+    # same trial directory names a plain `harbor run` on the bundle itself would.
+    task_dir = root / instance.uuid
     rows: list[tuple[str, str]] = []
     for relative in files:
         target = task_dir / relative

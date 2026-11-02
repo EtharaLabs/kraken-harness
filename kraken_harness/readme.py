@@ -13,7 +13,17 @@ import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
-from kraken_harness import base, benchmarks, cli, layout
+from kraken_harness import (
+    base,
+    benchmarks,
+    cli,
+    harness_config,
+    layers,
+    layout,
+    pilot,
+    run_config,
+    secrets,
+)
 
 README = "README.md"
 UPSTREAM = Path("docs") / "upstream" / "swefficiency-README.md"
@@ -139,8 +149,9 @@ def _running() -> list[str]:
         "",
         "```sh",
         "uv sync --frozen",
-        "uv run --frozen kraken-infer --root <parent> --work-dir <dir outside the parent> --agent-config agent.toml",
-        "uv run --frozen kraken-eval --root <parent> --work-dir <the same dir>",
+        "uv run --frozen kraken-infer --root <parent> --work-dir <dir outside the parent> --agent-config agent.toml \\",
+        "    --run-config run.toml --compute ec2",
+        "uv run --frozen kraken-eval --root <parent> --work-dir <the same dir> --run-config run.toml --compute ec2",
         "uv run --frozen python -m kraken_harness.readme --check",
         "```",
         "",
@@ -150,7 +161,54 @@ def _running() -> list[str]:
         "[agent]",
         'name = "<a Harbor agent name>"',
         'model_name = "<provider/model>"',
+        'model_api_key_name = "<the host variable holding the model key>"',
         "```",
+        "",
+        _doc(run_config),
+        "",
+        "| table | allowed keys |",
+        "| --- | --- |",
+        f"| top level | {_codes(sorted(run_config.TOP_LEVEL))} |",
+        f"| `[agent]` | {_codes(sorted(run_config.AGENT_KEYS))} |",
+        f"| `[environment]` | {_codes(sorted(run_config.ENVIRONMENT_KEYS))} |",
+        f"| `[verifier]` (evaluation and probes only) | {_codes(sorted(run_config.VERIFIER_KEYS))} |",
+        f"| `[compute.<name>]` | {_codes(sorted(run_config.PROFILE_KEYS))} |",
+        "",
+        "```toml",
+        'env_from_host = ["ANTHROPIC_API_KEY", "LITELLM_PROXY_API_KEY"]',
+        "",
+        "[agent]",
+        'model_api_format = "anthropic_messages"',
+        "agent_setup_timeout_multiplier = 10",
+        "",
+        "[environment]",
+        'extra_allowed_hosts = ["deb.debian.org", "registry.npmjs.org"]',
+        'extra_docker_compose = ["agent-hosts.compose.yaml"]',
+        "",
+        "[verifier]",
+        'env = { REWARDKIT_JUDGE = "<judge>", LITELLM_PROXY_API_KEY = "${LITELLM_PROXY_API_KEY}" }',
+        "",
+        "[compute.local]",
+        'docker_host = "unix://~/.colima/default/docker.sock"',
+        'gate_host = "host.docker.internal"',
+        "",
+        "[compute.ec2]",
+        'trinity_target = "@trinity"',
+        'gate_host = "172.17.0.1"',
+        "```",
+        "",
+        _doc(secrets),
+        "",
+        _doc(layers),
+        "",
+        "`--via job` (the default) runs each rollout as a one-trial `harbor run` job with "
+        "verification off; `--via trial` uses `harbor trial start`. `--probe` runs the agent and "
+        "the bundle's verifier in one job under `probes/`: an author-side probe, never graded and "
+        f"never difficulty evidence. {_doc(base.Benchmark._refuse_mixed_grading)}",
+        "",
+        _doc(harness_config),
+        "",
+        _doc(pilot),
     ]
 
 
