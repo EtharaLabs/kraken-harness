@@ -940,3 +940,9 @@ def test_a_failed_regrade_is_recorded_retried_under_a_new_name_and_blocks_the_su
     assert retried["evaluation_dir"].endswith("-r1-eval-2")
     assert (retried["exception"], retried["reward"]) == (None, 0.75)
     assert _eval(project, tmp_path, "--pilot-summary", BUNDLE, "--group-size", "1", "--pass-threshold", "0.5") == 0
+
+
+def test_a_key_prefix_inside_a_word_is_not_a_credential() -> None:
+    word = "Ta" + "sk-" + "progress_bar_description_text"
+    assert secrets.shape_of(f'description="{word}"') is None
+    assert secrets.shape_of(f"token={FAKE_KEY}") == "anthropic-key"

@@ -31,7 +31,10 @@ _SHAPES = (
     ("google-api-key", "AI" + r"za[0-9A-Za-z_-]{35}"),
     ("private-key-block", "-----BEGIN " + r"[A-Z ]*PRIVATE KEY-----"),
 )
-KEY_SHAPES = tuple((name, re.compile(pattern)) for name, pattern in _SHAPES)
+# A shape must start a token, so a word such as "Task-progress" never reads as a key prefix.
+KEY_SHAPES = tuple(
+    (name, re.compile(r"(?<![A-Za-z0-9_-])" + pattern)) for name, pattern in _SHAPES
+)
 
 
 def template(name: str) -> str:
